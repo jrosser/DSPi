@@ -302,6 +302,8 @@ typedef struct {
     bool bypass;                 // skip processing if true
     int32_t b0_i, b1_i, b2_i, a1_i, a2_i; // 32 bit fixed point implementation
     int32_t x1, x2, y1, y2, accumulator;  // 32 bit fixed point implementation
+    float sva1, sva2, sva3, svm0, svm1, svm2; // state variable filter coefficients
+    float svic1eq, svic2eq;                   // state variable filter state vars
     bool last;                            // the last filter for this channel
 } Biquad;
 #else
