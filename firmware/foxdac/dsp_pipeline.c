@@ -208,20 +208,258 @@ float dsp_process_channel(Biquad * __restrict biquads, float input, uint8_t chan
     return sample;
 }
 
-#define BIQUAD(I)\
-  sample_##I = *sample;\
+// double precision biquad inner implementation
+// double precision b coefficients, double precision b multiplies
+// double precision a coefficients, double precision a multiplies
+// double precision state vars, double precision accumulator
+#define BIQUAD_INNER_DOUBLE(I, N)\
 \
-  /* y[n] = b0*x[n] + s1[n-1] */\
-  result_f = dcp_dadd_d2f(dcp_f2d(b0 * sample_##I), s1);\
+    /* y[n] = b0*x[n] + s1[n-1] */\
+    result_d = dcp_dadd(dcp_dmul(b0##N, sample##I), s1##N);\
 \
-  /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
-  val1 = b1 * sample_##I - a1 * result_f;\
-  s1 = dcp_dadd(dcp_f2d(val1), s2);\
+    /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
+    val1 = dcp_dsub(dcp_dmul(b1##N, sample##I), dcp_dmul(a1##N, result_d));\
+    s1 = dcp_dadd(val1, s2##N);\
 \
-  /* s2[n] = b2*x[n] - a2*y[n] */\
-  s2 = dcp_f2d(b2 * sample_##I - a2 * result_f);\
+    /* s2[n] = b2*x[n] - a2*y[n] */\
+    s2 = dcp_dsub(dcp_dmul(b2##N, sample##I), dcp_dmul(a2##N, result_d));\
+
+// intermediate precision biquad inner implementation
+// single precision b coefficients, single precision b multiplies
+// double precision a coefficients, double precision a multiplies
+// double precision state vars, double precision accumulator
+// double precision subtraction of a1/a2 terms
+#define BIQUAD_INNER_INTER(I, N)\
 \
+    /* y[n] = b0*x[n] + s1[n-1] */\
+    result_d = dcp_dadd(dcp_f2d(b0##N * sample##I), s1##N);\
+\
+    /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
+    val1 = dcp_dsub(dcp_f2d(b1##N * sample##I), dcp_dmul(a1##N, result_d));\
+    s1##N = dcp_dadd(val1, s2##N);\
+\
+    /* s2[n] = b2*x[n] - a2*y[n] */\
+    s2##N = dcp_dsub(dcp_f2d(b2##N * sample##I), dcp_dmul(a2##N, result_d));\
+
+// original precision DSPi biquad inner implementation
+// single precision b coefficients, single precision b multiplies
+// single precision a coefficients, single precision a multiplies
+// double precision state vars, double precision accumulator
+// double precision subtraction of a1/a2 terms
+#define BIQUAD_INNER_ORIG_DSUB(I, N)\
+\
+    /* y[n] = b0*x[n] + s1[n-1] */\
+    result_f = dcp_dadd_d2f(dcp_f2d(b0##N * sample##I), s1##N);\
+\
+    /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
+    val1 = dcp_dsub(dcp_f2d(b1##N * sample##I), dcp_f2d(a1##N * result_f));\
+    s1##N = dcp_dadd(dcp_f2d(val1), s2##N);\
+\
+    /* s2[n] = b2*x[n] - a2*y[n] */\
+    s2##N = dcp_dsub(dcp_f2d(b2##N) * sample##I, dcp_f2d(a2##N * result_f));\
+
+// original precision DSPi biquad inner implementation
+// single precision b coefficients, single precision b multiplies
+// single precision a coefficients, single precision a multiplies
+// double precision state vars, double precision accumulator
+// single precision subtraction of a1/a2 terms
+#define BIQUAD_INNER_ORIG(I, N)\
+\
+    /* y[n] = b0*x[n] + s1[n-1] */\
+    result_f = dcp_dadd_d2f(dcp_f2d(b0##N * sample##I), s1##N);\
+\
+    /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
+    val1 = b1##N * sample##I - a1##N * result_f;\
+    s1##N = dcp_dadd(dcp_f2d(val1), s2##N);\
+\
+    /* s2[n] = b2*x[n] - a2*y[n] */\
+    s2##N = dcp_f2d(b2##N * sample##I - a2##N * result_f);\
+
+// single precision biquad inner implementation
+// single precision coefficients, single precision multiplies
+// single precision state vars, single precision accumulator
+#define BIQUAD_INNER_SINGLE(I, N)\
+\
+    /* y[n] = b0*x[n] + s1[n-1] */\
+    result_f = b0##N * sample##I + s1##N;\
+\
+    /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */\
+    val1 = b1##N * sample##I - a1##N * result_f;\
+    s1##N = val1 + s2##N;\
+\
+    /* s2[n] = b2*x[n] - a2*y[n] */\
+    s2##N = b2##N * sample##I - a2##N * result_f;\
+
+// one double precision biquad on sample{I}
+// no suffix on coefficient or state vars
+#define BIQUAD_DOUBLE(I)\
+  sample##I = dcp_f2d(*sample);\
+  BIQUAD_INNER_DOUBLE(I, )\
+  *sample++ = dcp_d2f(result_d);\
+
+// one intermediate precision biquad on sample{I}
+// no suffix on coefficient or state vars
+#define BIQUAD_INTER(I)\
+  sample##I = *sample;\
+  BIQUAD_INNER_INTER(I, )\
+  *sample++ = dcp_d2f(result_d);\
+
+// one original biquad with double precision subtract on sample{I}
+// no suffix on coefficient or state vars
+#define BIQUAD_ORIG_DSUB(I)\
+  sample##I = *sample;\
+  BIQUAD_INNER_ORIG_DSUB(I, )\
   *sample++ = result_f;
+
+// one original biquad on sample{I}
+// no suffix on coefficient or state vars
+#define BIQUAD_ORIG(I)\
+  sample##I = *sample;\
+  BIQUAD_INNER_ORIG(I, )\
+  *sample++ = result_f;
+
+// one single precision biquad on sample{I}
+// no suffix on coefficient or state vars
+#define BIQUAD_SINGLE(I)\
+  sample##I = *sample;\
+  BIQUAD_INNER_SINGLE(I, )\
+  *sample++ = result_f;
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+    uint8_t num_bands = channel_band_counts[channel];
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    for (int band = 0; band < num_bands; band++) {
+        Biquad *bq = &biquads[band];
+        if (bq->bypass) continue;
+
+        // Load coefficients once for all samples
+        float b0 = bq->b0;
+        float b1 = bq->b1;
+        float b2 = bq->b2;
+        float a1 = bq->a1;
+        float a2 = bq->a2;
+        float s1 = dcp_d2f(bq->s1);
+        float s2 = dcp_d2f(bq->s2);
+
+        float *sample = samples;
+        float sample_a;
+        float result_f, val1;
+
+        // Process all samples with this biquad
+        for (uint32_t i = 0; i < count; i++) {
+            BIQUAD_SINGLE(_a);
+        }
+
+        // Store state back
+        bq->s1 = dcp_f2d(s1);
+        bq->s2 = dcp_f2d(s2);
+    }
+}
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_intermediate(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+    uint8_t num_bands = channel_band_counts[channel];
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    for (int band = 0; band < num_bands; band++) {
+        Biquad *bq = &biquads[band];
+        if (bq->bypass) continue;
+
+        // Load coefficients once for all samples
+        float b0 = bq->b0;
+        float b1 = bq->b1;
+        float b2 = bq->b2;
+        double a1 = dcp_f2d(bq->a1);   //FIXME - needs double precision a coeffs
+        double a2 = dcp_f2d(bq->a2);
+        double s1 = bq->s1;
+        double s2 = bq->s2;
+
+        float *sample = samples;
+        float sample_a;
+        double result_d, val1;
+
+        // Process all samples with this biquad
+        for (uint32_t i = 0; i < count; i++) {
+            BIQUAD_INTER(_a);
+        }
+
+        // Store state back
+        bq->s1 = s1;
+        bq->s2 = s2;
+    }
+}
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_double(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+    uint8_t num_bands = channel_band_counts[channel];
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    for (int band = 0; band < num_bands; band++) {
+        Biquad *bq = &biquads[band];
+        if (bq->bypass) continue;
+
+        // Load coefficients once for all samples
+        double b0 = dcp_f2d(bq->b0);    //FIXME - needs all double precision coefficients
+        double b1 = dcp_f2d(bq->b1);
+        double b2 = dcp_f2d(bq->b2);
+        double a1 = dcp_f2d(bq->a1);
+        double a2 = dcp_f2d(bq->a2);
+        double s1 = bq->s1;
+        double s2 = bq->s2;
+
+        float *sample = samples;
+        double sample_a;
+        double result_d, val1;
+
+        // Process all samples with this biquad
+        for (uint32_t i = 0; i < count; i++) {
+            BIQUAD_DOUBLE(_a)
+        }
+
+        // Store state back
+        bq->s1 = s1;
+        bq->s2 = s2;
+    }
+}
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_orig_dsub(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+    uint8_t num_bands = channel_band_counts[channel];
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    for (int band = 0; band < num_bands; band++) {
+        Biquad *bq = &biquads[band];
+        if (bq->bypass) continue;
+
+        // Load coefficients once for all samples
+        float b0 = bq->b0;
+        float b1 = bq->b1;
+        float b2 = bq->b2;
+        float a1 = bq->a1;
+        float a2 = bq->a2;
+        double s1 = bq->s1;
+        double s2 = bq->s2;
+
+        float *sample = samples;
+        float sample_a;
+        float result_f, val1;
+
+        // Process all samples with this biquad
+        for (uint32_t i = 0; i < count; i++) {
+            BIQUAD_ORIG_DSUB(_a);
+        }
+
+        // Store state back
+        bq->s1 = dcp_f2d(s1);
+        bq->s2 = dcp_f2d(s2);
+    }
+}
 
 DSP_TIME_CRITICAL
 void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict samples,
@@ -252,14 +490,14 @@ void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict s
 
         uint32_t n = (count + 7) / 8;
         switch (count % 8) {
-            case 0: do { BIQUAD(a);
-            case 7:      BIQUAD(h);
-            case 6:      BIQUAD(g);
-            case 5:      BIQUAD(f);
-            case 4:      BIQUAD(e);
-            case 3:      BIQUAD(d);
-            case 2:      BIQUAD(c);
-            case 1:      BIQUAD(b);
+            case 0: do { BIQUAD_ORIG(_a);
+            case 7:      BIQUAD_ORIG(_h);
+            case 6:      BIQUAD_ORIG(_g);
+            case 5:      BIQUAD_ORIG(_f);
+            case 4:      BIQUAD_ORIG(_e);
+            case 3:      BIQUAD_ORIG(_d);
+            case 2:      BIQUAD_ORIG(_c);
+            case 1:      BIQUAD_ORIG(_b);
             } while (--n > 0);
         }
 

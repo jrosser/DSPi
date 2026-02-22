@@ -9,6 +9,31 @@
 // Inline Assembly for RP2350 DCP (Double Coprocessor)
 // Allows direct access to hardware double precision accumulator without function call overhead.
 
+static inline double dcp_dmul(double da, double db) {
+    uint64_t ua, ub, ur;
+    uint32_t a, b, c, d, e, f, g;
+    memcpy(&ua, &da, 8); memcpy(&ub, &db, 8);
+    __asm__ volatile (
+        "mcrr  p4,   #1,   %Q[ua],%R[ua], c0\n\t"    // WXUP ua
+        "mcrr  p4,   #1,   %Q[ub],%R[ub], c1\n\t"    // WYUP ub
+        "mrrc  p4,   #0,   %[a],  %[b],   c4\n\t"    // RXMS a, b
+        "mrrc  p4,   #0,   %[c],  %[d],   c5\n\t"    // RYMS c, d
+        "umull %[e], %[f], %[a],  %[c]\n\t"          // e,f = a * c
+        "movs  %[g], #0\n\t"                         // g = 0
+        "umlal %[f], %[g], %[a],  %[d]\n\t"          // f,g += a * d
+        "umlal %[f], %[g], %[b],  %[c]\n\t"          // f,g += b * c
+        "mcrr  p4,   #2,   %[e],  %[f],   c0\n\t"    // WXMS e,f
+        "movs  %[e], #0\n\t"                         // e = 0
+        "umlal %[g], %[e], %[b],  %[d]\n\t"          // g,e += b * d
+        "mcrr  p4,   #3,   %[g],  %[e],   c0\n\t"    // WXMO g,e
+        "cdp   p4,   #8,   c0,    c0,     c0,#1\n\t" // NRDD
+        "mrrc  p4,   #5,   %Q[ur],%R[ur], c0\n\t"    // RDDM ur
+        : [ur] "=r" (ur), [a] "=r" (a), [b] "=r" (b), [c] "=r" (c), [d] "=r" (d), [e] "=r" (e), [f] "=r" (f), [g] "=r" (g)
+        : [ua] "r" (ua), [ub] "r" (ub)
+    );
+    double dr; memcpy(&dr, &ur, 8); return dr;
+}
+
 static inline double dcp_dadd(double a, double b) {
     uint64_t ua, ub, ur;
     memcpy(&ua, &a, 8); memcpy(&ub, &b, 8);
