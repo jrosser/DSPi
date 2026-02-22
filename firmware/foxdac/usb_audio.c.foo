@@ -4,9 +4,6 @@
  * Uses pico-extras usb_device library with LUFA descriptor types
  */
 
-#include <fenv.h>
-#pragma STDC FENV_ACCESS ON
-
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -505,7 +502,6 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
 
         // Core 0: Peaks + S/PDIF for pair 0
         start_systick();
-        unsigned current_rounding = fegetround();
         for (uint32_t i = 0; i < sample_count; i++) {
             float abs_ol = fabsf(buf_out[0][i]); if (abs_ol > peak_ol) peak_ol = abs_ol;
             float abs_or = fabsf(buf_out[1][i]); if (abs_or > peak_or) peak_or = abs_or;
@@ -515,37 +511,31 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             if (!matrix_mixer.outputs[left_ch].enabled && !matrix_mixer.outputs[right_ch].enabled) {
                 memset(audio_buf[0]->buffer->bytes, 0, sample_count * 4);
             } else {
-                // scale up, dither and clamp
-                fesetround(FE_TOWARDZERO);
+                int16_t *out_ptr = (int16_t *)audio_buf[0]->buffer->bytes;
                 for (uint32_t i = 0; i < sample_count; i++) {
-                    float dl = buf_out[left_ch][i] * 32768.0f;
-                    float dr = buf_out[right_ch][i] * 32768.0f;
 
+                    //generate TPDF dither
                     uint32_t dither0 = (uint32_t)rand_r(&dither0_seed) % 2;
                     uint32_t dither1 = (uint32_t)rand_r(&dither1_seed) % 2;
                     float dither = dither0;
                     dither -= dither1;
 
+                    //scale up output values and apply dither
+                    float dl = buf_out[left_ch][i] * 32768.0f;
+                    float dr = buf_out[right_ch][i] * 32768.0f;
                     dl += dither;
                     dr += dither;
 
+                    //clamp to max values allowed in destination integer type
                     dl = fmaxf(-32768.0f, fminf(32767.0f, dl));
                     dr = fmaxf(-32768.0f, fminf(32767.0f, dr));
 
-                    buf_out[left_ch][i] = dl;
-                    buf_out[right_ch][i] = dr;
-                }
-
-                //convert to integer, using 'round to nearest'
-                fesetround(FE_TONEAREST);
-                int16_t *out_ptr = (int16_t *)audio_buf[0]->buffer->bytes;
-                for (uint32_t i = 0; i < sample_count; i++) {
-                    out_ptr[i*2]     = (int16_t)rintf(buf_out[left_ch][i]);
-                    out_ptr[i*2+1]   = (int16_t)rintf(buf_out[right_ch][i]);
+                    //truncate to integer, handling dead zone between 1.0f and -1.0f
+                    out_ptr[i*2]     = (int16_t)(dl + 32768.5f) - 32768;
+                    out_ptr[i*2+1]   = (int16_t)(dr + 32768.5f) - 32768;
                 }
             }
         }
-        fesetround(current_rounding);
         systick_peaks_spdif = stop_systick();
 
         // Wait for Core 1 (EQ + delay + S/PDIF for outputs 2-7)
@@ -610,7 +600,6 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
         }
 
         // S/PDIF conversion
-        unsigned current_rounding = fegetround();
         for (int pair = 0; pair < 4; pair++) {
             if (!audio_buf[pair]) continue;
             int left_ch = pair * 2;
@@ -618,38 +607,30 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             if (!matrix_mixer.outputs[left_ch].enabled && !matrix_mixer.outputs[right_ch].enabled) {
                 memset(audio_buf[pair]->buffer->bytes, 0, sample_count * 4);
                 continue;
-            } else {
-                // scale up, dither and clamp
-                fesetround(FE_TOWARDZERO);
-                for (uint32_t i = 0; i < sample_count; i++) {
-                    float dl = buf_out[left_ch][i] * 32768.0f;
-                    float dr = buf_out[right_ch][i] * 32768.0f;
+            }
+            int16_t *out_ptr = (int16_t *)audio_buf[pair]->buffer->bytes;
+            for (uint32_t i = 0; i < sample_count; i++) {
+                //generate TPDF dither
+                uint32_t dither0 = (uint32_t)rand_r(&dither0_seed) % 2;
+                uint32_t dither1 = (uint32_t)rand_r(&dither1_seed) % 2;
+                float dither = dither0;
+                dither -= dither1;
 
-                    uint32_t dither0 = (uint32_t)rand_r(&dither0_seed) % 2;
-                    uint32_t dither1 = (uint32_t)rand_r(&dither1_seed) % 2;
-                    float dither = dither0;
-                    dither -= dither1;
+                //scale up output values and apply dither
+                float dl = buf_out[left_ch][i] * 32768.0f;
+                float dr = buf_out[right_ch][i] * 32768.0f;
+                dl += dither;
+                dr += dither;
 
-                    dl += dither;
-                    dr += dither;
+                //clamp to max values allowed in destination integer type
+                dl = fmaxf(-32768.0f, fminf(32767.0f, dl));
+                dr = fmaxf(-32768.0f, fminf(32767.0f, dr));
 
-                    dl = fmaxf(-32768.0f, fminf(32767.0f, dl));
-                    dr = fmaxf(-32768.0f, fminf(32767.0f, dr));
-
-                    buf_out[left_ch][i] = dl;
-                    buf_out[right_ch][i] = dr;
-                }
-
-                //convert to integer, using 'round to nearest'
-                fesetround(FE_TONEAREST);
-                int16_t *out_ptr = (int16_t *)audio_buf[0]->buffer->bytes;
-                for (uint32_t i = 0; i < sample_count; i++) {
-                    out_ptr[i*2]     = (int16_t)rintf(buf_out[left_ch][i]);
-                    out_ptr[i*2+1]   = (int16_t)rintf(buf_out[right_ch][i]);
-                }
+                //truncate to integer, handling dead zone between 1.0f and -1.0f
+                out_ptr[i*2]     = (int16_t)(dl + 32768.5f) - 32768;
+                out_ptr[i*2+1]   = (int16_t)(dr + 32768.5f) - 32768;
             }
         }
-        fesetround(current_rounding);
         systick_peaks_spdif = stop_systick();
 
 #if ENABLE_SUB
