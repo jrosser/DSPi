@@ -1,7 +1,9 @@
+#include <assert.h>
 #include <math.h>
 #include <string.h>
 #include "dsp_pipeline.h"
 #include "dcp_inline.h"
+#include "loudness.h"
 
 static inline bool is_filter_flat(const EqParamPacket *p) {
     if (p->type == FILTER_FLAT) return true;
@@ -324,6 +326,55 @@ float dsp_process_channel(Biquad * __restrict biquads, float input, uint8_t chan
   sample##I = *sample;\
   BIQUAD_INNER_SINGLE(I, )\
   *sample++ = result_f;
+
+DSP_TIME_CRITICAL
+void dsp_process_loudness_block(Biquad * __restrict biquads, float * __restrict samples_l, float * __restrict samples_r,
+                                uint32_t count) {
+
+    //This function assumes 2 biquads for loudness
+    static_assert(LOUDNESS_BIQUAD_COUNT == 2, "dsp_process_loudness_block only supports 2 biquads!");
+
+    // Load 2 sets of coefficients once to use for all samples
+    float b0_0 = biquads[0].b0;
+    float b1_0 = biquads[0].b1;
+    float b2_0 = biquads[0].b2;
+    float a1_0 = biquads[0].a1;
+    float a2_0 = biquads[0].a2;
+    double s1_0 = biquads[0].s1;
+    double s2_0 = biquads[0].s2;
+
+    float b0_1 = biquads[1].b0;
+    float b1_1 = biquads[1].b1;
+    float b2_1 = biquads[1].b2;
+    float a1_1 = biquads[1].a1;
+    float a2_1 = biquads[1].a2;
+    double s1_1 = biquads[1].s1;
+    double s2_1 = biquads[1].s2;
+
+    float result_f, val1;
+    float sample;
+
+    // process all left channel samples with both biquads
+    // followed by all right channel samples with both biquads
+    uint32_t n = 2;
+    float * sample_ptr = samples_l;
+    do {
+        for (uint32_t i = 0; i < count; i++) {
+            sample = *sample_ptr;\
+            BIQUAD_INNER_ORIG(, _0)\
+            sample = result_f;\
+            BIQUAD_INNER_ORIG(, _1)\
+            *sample_ptr++ = result_f;
+        }
+        sample_ptr = samples_r;
+    } while(--n > 0);
+
+    // Store state back
+    biquads[0].s1 = s1_0;
+    biquads[0].s2 = s2_0;
+    biquads[1].s1 = s1_1;
+    biquads[1].s2 = s2_1;
+}
 
 DSP_TIME_CRITICAL
 void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __restrict samples,
