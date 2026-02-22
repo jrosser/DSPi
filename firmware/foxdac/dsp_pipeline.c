@@ -95,6 +95,20 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
     bq->b2 = b2_f * inv_a0;
     bq->a1 = a1_f * inv_a0;
     bq->a2 = a2_f * inv_a0;
+
+    //integer storage for 32bit integer
+    // TODO - is one float multiply by 32780x8192 ok here precision wise?
+    bq->b0_i = (int32_t)(bq->b0 * 32768.0f);
+    bq->b0_i *= 8192;
+    bq->b1_i = (int32_t)(bq->b1 * 32768.0f);
+    bq->b1_i *= 8192;
+    bq->b2_i = (int32_t)(bq->b2 * 32768.0f);
+    bq->b2_i *= 8192;
+    bq->a1_i = (int32_t)(bq->a1 * -32768.0f);
+    bq->a1_i *= 8192;
+    bq->a2_i = (int32_t)(bq->a2 * -32768.0f);
+    bq->a2_i *= 8192;
+
 #else
     // Q28 Fixed Point Storage
     float scale = (float)(1LL << FILTER_SHIFT);
@@ -114,6 +128,7 @@ void dsp_init_default_filters() {
         channel_bypassed[ch] = true;
         for (int b = 0; b < MAX_BANDS; b++) {
             filters[ch][b].bypass = true;
+            filters[ch][b].last = (b == MAX_BANDS-1) ? 1 : 0;
 #if PICO_RP2350
             filters[ch][b].b0 = 1.0f;
 #else
@@ -511,6 +526,113 @@ void dsp_process_channel_block_orig_dsub(Biquad * __restrict biquads, float * __
         bq->s2 = dcp_f2d(s2);
     }
 }
+
+// https://dsp.stackexchange.com/questions/21792/best-implementation-of-a-real-time-fixed-point-iir-filter-with-constant-coeffic
+//
+// int32_t coefficients
+// float 1.0 -> 0x10000000
+//  7654 3210765432107654321076543210
+// +----+----------------------------+
+// |  4 |  28 fractional bits        |
+// +----+----------------------------+
+//
+// int32_t sample data
+// float 1.0 -> 0x400000
+//  76543210 765432107654321076543210
+// +--------+------------------------+
+// |headroom| 24 bit integer sample  |
+// +--------+------------------------+
+//
+// int64_t accumulator
+//  4321076543210765432107654321076543210765 43210765432107654321076543210
+// +----------------------------------------+-----------------------------+
+// | 36 integer bits                        |  28 fractional bits         |
+// +----------------------------------------+-----------------------------+
+//
+// int32_t output data (accumulator>>28)
+//  43210765432107654321076543210765 4321076543210765432107654321076543210
+// +--------------------------------+-------------------------------------+
+// |                                | 36 integer bits                     |
+// +--------------------------------+-------------------------------------+
+//                                      |         32 output bits          |
+//                                      +---------------------------------+
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_integer(Biquad * __restrict bq, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+
+    //make do/while loop possible by rewinding bq pointer by one
+    bq--;
+
+    //sample counter is implemented as a float to save integer registers
+    float count_f = (float)count;
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    do {
+        bq++;
+        if (bq->bypass) continue;
+
+        int32_t b0 = bq->b0_i;
+        int32_t b1 = bq->b1_i;
+        int32_t b2 = bq->b2_i;
+        int32_t a1 = bq->a1_i;
+        int32_t a2 = bq->a2_i;
+        int32_t x1 = bq->x1;
+        int32_t x2 = bq->x2;
+        int32_t y1 = bq->y1;
+        int32_t y2 = bq->y2;
+        int64_t accumulator = (int64_t)bq->accumulator;
+
+        float *sample_f = samples;
+
+        // Process all samples with this biquad
+        for (float i = 0; i < count_f; i+=1.0f) {
+
+            //convert back to integer with 16bit MSB positioned as if it were a 24 bit sample
+            int32_t sample_i = (int32_t)(*sample_f * 8388607.0f);
+
+            accumulator += (int64_t)b0*sample_i;    // an optimized compiler will figure this out
+            accumulator += (int64_t)b1*x1;          // and perform only a 32x32 = 64 bit multiply-accumulate
+            accumulator += (int64_t)b2*x2;
+            accumulator += (int64_t)a1*y1;
+            accumulator += (int64_t)a2*y2;
+
+            if (accumulator > 0x07FFFFFFFFFFFFFFLL)
+                {
+                accumulator = 0x07FFFFFFFFFFFFFFLL;     // clip value
+                }
+            if (accumulator < -0x07FFFFFFFFFFFFFFLL)
+                {
+                accumulator = -0x07FFFFFFFFFFFFFFLL;    // clip value
+                }
+
+            x2 = x1;                                    // bump the states over
+            x1 = sample_i;                              // current input sample
+
+            //re-use sameple_i to save a register
+            sample_i =  (int32_t)(accumulator>>28);     // point of quantization, always rounding down
+
+            y2 = y1;                                    // previous output sample
+            y1 = sample_i;                              // current output sample
+
+            accumulator &= 0x000000000FFFFFFFLL;     // keep the fractional bits that were dropped for 
+                                                     // the next sample, otherwise clear the accumulator
+
+            //put the whole 32 bit integer value into the float and scale down
+            //need to preserve large values due to filter gain
+            //or otherwise maintain precision from lesser significant bits
+            *sample_f++ = (float)sample_i / 8388607.0f;
+        }
+
+        bq->x1 = x1;
+        bq->x2 = x2;
+        bq->y1 = y1;
+        bq->y2 = y2;
+        bq->accumulator = (int32_t)accumulator;
+
+    } while(bq->last == 0);
+}
+
 
 DSP_TIME_CRITICAL
 void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict samples,

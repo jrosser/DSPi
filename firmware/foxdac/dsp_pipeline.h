@@ -41,6 +41,8 @@ void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __res
                                uint32_t count, uint8_t channel);
 void dsp_process_channel_block_orig_dsub(Biquad * __restrict biquads, float * __restrict samples,
                                uint32_t count, uint8_t channel);
+void dsp_process_channel_block_integer(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel);
 void dsp_process_loudness_block(Biquad * __restrict biquads, float * __restrict samples_l, float * __restrict samples_r,
                                 uint32_t count);
 #else

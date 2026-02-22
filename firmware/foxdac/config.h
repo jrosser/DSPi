@@ -300,6 +300,9 @@ typedef struct {
     float b0, b1, b2, a1, a2;    // float coefficients
     double s1, s2;               // double state accumulators (Using inline DCP)
     bool bypass;                 // skip processing if true
+    int32_t b0_i, b1_i, b2_i, a1_i, a2_i; // 32 bit fixed point implementation
+    int32_t x1, x2, y1, y2, accumulator;  // 32 bit fixed point implementation
+    bool last;                            // the last filter for this channel
 } Biquad;
 #else
 typedef struct {
