@@ -85,6 +85,10 @@ static float buf_out[NUM_OUTPUT_CHANNELS][192];
 static int32_t buf_out[NUM_OUTPUT_CHANNELS][192];
 #endif
 
+// Dither state
+unsigned dither0_seed = 0xa9662080;
+unsigned dither1_seed = 0x204a9c59;
+
 // Sync State
 volatile uint64_t total_samples_produced = 0;
 volatile uint64_t start_time_us = 0;
@@ -509,10 +513,24 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             } else {
                 int16_t *out_ptr = (int16_t *)audio_buf[0]->buffer->bytes;
                 for (uint32_t i = 0; i < sample_count; i++) {
-                    float dl = fmaxf(-1.0f, fminf(1.0f, buf_out[0][i]));
-                    float dr = fmaxf(-1.0f, fminf(1.0f, buf_out[1][i]));
-                    out_ptr[i*2]   = (int16_t)(dl * 32767.0f);
-                    out_ptr[i*2+1] = (int16_t)(dr * 32767.0f);
+
+                    //generate TPDF dither
+                    uint32_t dither0 = (uint32_t)rand_r(&dither0_seed) % 2;
+                    uint32_t dither1 = (uint32_t)rand_r(&dither1_seed) % 2;
+                    float dither = dither0;
+                    dither -= dither1;
+
+                    //scale up output values and apply dither
+                    float dl = buf_out[left_ch][i] * 32768.0f;
+                    float dr = buf_out[right_ch][i] * 32768.0f;
+                    dl += dither;
+                    dr += dither;
+
+                    //clamp to max values allowed in integer type and truncate
+                    dl = fmaxf(-32768.0f, fminf(32767.0f, dl));
+                    dr = fmaxf(-32768.0f, fminf(32767.0f, dr));
+                    out_ptr[i*2]   = (int16_t)(dl);
+                    out_ptr[i*2+1] = (int16_t)(dr);
                 }
             }
         }
@@ -590,10 +608,23 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             }
             int16_t *out_ptr = (int16_t *)audio_buf[pair]->buffer->bytes;
             for (uint32_t i = 0; i < sample_count; i++) {
-                float dl = fmaxf(-1.0f, fminf(1.0f, buf_out[left_ch][i]));
-                float dr = fmaxf(-1.0f, fminf(1.0f, buf_out[right_ch][i]));
-                out_ptr[i*2]     = (int16_t)(dl * 32767.0f);
-                out_ptr[i*2+1]   = (int16_t)(dr * 32767.0f);
+                //generate TPDF dither
+                uint32_t dither0 = (uint32_t)rand_r(&dither0_seed) % 2;
+                uint32_t dither1 = (uint32_t)rand_r(&dither1_seed) % 2;
+                float dither = dither0;
+                dither -= dither1;
+
+                //scale up output values and apply dither
+                float dl = buf_out[left_ch][i] * 32768.0f;
+                float dr = buf_out[right_ch][i] * 32768.0f;
+                dl += dither;
+                dr += dither;
+
+                //clamp to max values allowed in integer type and truncate
+                dl = fmaxf(-32768.0f, fminf(32767.0f, dl));
+                dr = fmaxf(-32768.0f, fminf(32767.0f, dr));
+                out_ptr[i*2]   = (int16_t)(dl);
+                out_ptr[i*2+1] = (int16_t)(dr);
             }
         }
         systick_peaks_spdif = stop_systick();
