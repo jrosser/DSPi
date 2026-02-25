@@ -71,6 +71,10 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
 
     bq->bypass = false;
 
+    // indicate which is the best filter implementation for this corner frequency / sample rate
+    // biquad is good above FS/10, SVF is good below FS/6, pick the midpoint between these
+    bq->use_svf = (p->freq < (sample_rate / 7.5f));
+
     //biquad coefficients
     float omega = 2.0f * 3.1415926535f * p->freq / sample_rate;
     float sn = sinf(omega); float cs = cosf(omega);
@@ -299,6 +303,82 @@ void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __res
         // Store state back
         bq->s1 = s1;
         bq->s2 = s2;
+    }
+}
+
+DSP_TIME_CRITICAL
+void dsp_process_channel_block_hybrid(Biquad * __restrict biquads, float * __restrict samples,
+                               uint32_t count, uint8_t channel) {
+    uint8_t num_bands = channel_band_counts[channel];
+
+    float *sample;
+    Biquad * __restrict bq = biquads;
+
+    // Process each biquad across all samples (coefficients loaded once per filter)
+    for (int band = 0; band < num_bands; band++) {
+        Biquad *bq = &biquads[band];
+        if (bq->bypass) continue;
+
+        if(bq->use_svf) {
+            //state variable filter coefficients
+            float sva1 = bq->sva1;
+            float sva2 = bq->sva2;
+            float sva3 = bq->sva3;
+            float svm0 = bq->svm0;
+            float svm1 = bq->svm1;
+            float svm2 = bq->svm2;
+
+            //state variable filter internal state
+            float svic1eq = bq->svic1eq;
+            float svic2eq = bq->svic2eq;
+
+            // this doesnt end up in a register otherwise
+            register float two_f = 2.0f;
+
+            sample = samples;
+            // Process all samples with this state variable filter
+            uint32_t i=0;
+            do {
+                float svf_in = *sample;
+                float v3 = svf_in - svic2eq;
+                float v1 = sva1 * svic1eq + sva2 * v3;
+                float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
+                svic1eq = two_f * v1 - svic1eq;
+                svic2eq = two_f * v2 - svic2eq;
+                *sample++ = svm0 * svf_in + svm1 * v1 + svm2 * v2;
+            } while(++i < count);
+
+            // Store state back
+            bq->svic1eq = svic1eq;
+            bq->svic2eq = svic2eq;
+
+        } else {
+
+            // biquad coefficients
+            float b0 = bq->b0;
+            float b1 = bq->b1;
+            float b2 = bq->b2;
+            float a1 = bq->a1;
+            float a2 = bq->a2;
+            float s1 = bq->s1;
+            float s2 = bq->s2;
+
+            sample = samples;
+            // Process all samples with this biquad
+            uint32_t i=0;
+            do {
+                float bq_in = *sample;
+                float bq_out = b0 * bq_in + s1;          /* y[n] = b0*x[n] + s1[n-1] */
+                float val1 = b1 * bq_in - a1 * bq_out;   /* s1[n] = b1*x[n] - a1*y[n] + s2[n-1] */
+                s1 = val1 + s2; 
+                s2 = b2 * bq_in - a2 * bq_out;           /* s2[n] = b2*x[n] - a2*y[n] */
+                *sample++ = bq_out;
+            } while(++i < count);
+
+            // Store state back
+            bq->s1 = s1;
+            bq->s2 = s2;
+        }
     }
 }
 

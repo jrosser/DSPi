@@ -379,10 +379,10 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
     // ========== PASS 2: Master EQ (Block-Based) ==========
     if (!is_bypassed) {
         if (!channel_bypassed[CH_MASTER_LEFT]) {
-            dsp_process_channel_block_single(filters[CH_MASTER_LEFT], buf_l, sample_count, CH_MASTER_LEFT);
+            dsp_process_channel_block_hybrid(filters[CH_MASTER_LEFT], buf_l, sample_count, CH_MASTER_LEFT);
         }
         if (!channel_bypassed[CH_MASTER_RIGHT]) {
-            dsp_process_channel_block_single(filters[CH_MASTER_RIGHT], buf_r, sample_count, CH_MASTER_RIGHT);
+            dsp_process_channel_block_hybrid(filters[CH_MASTER_RIGHT], buf_r, sample_count, CH_MASTER_RIGHT);
         }
     }
 
@@ -452,7 +452,7 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             if (!matrix_mixer.outputs[out].mute) {
                 uint8_t eq_ch = CH_OUT_1 + out;
                 if (!channel_bypassed[eq_ch]) {
-                    dsp_process_channel_block_single(filters[eq_ch], buf_out[out], sample_count, eq_ch);
+                    dsp_process_channel_block_hybrid(filters[eq_ch], buf_out[out], sample_count, eq_ch);
                 }
             }
             float gain = matrix_mixer.outputs[out].mute ? 0.0f
@@ -521,7 +521,7 @@ static void __not_in_flash_func(process_audio_packet)(const uint8_t *data, uint1
             if (!matrix_mixer.outputs[out].mute) {
                 uint8_t eq_ch = CH_OUT_1 + out;
                 if (!channel_bypassed[eq_ch]) {
-                    dsp_process_channel_block_single(filters[eq_ch], buf_out[out], sample_count, eq_ch);
+                    dsp_process_channel_block_hybrid(filters[eq_ch], buf_out[out], sample_count, eq_ch);
                 }
             }
             float gain = matrix_mixer.outputs[out].mute ? 0.0f

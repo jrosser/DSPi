@@ -313,6 +313,7 @@ typedef struct {
     float sva1, sva2, sva3, svm0, svm1, svm2; // state variable filter coefficients
     float svic1eq, svic2eq;                   // state variable filter state vars
 
+    bool use_svf;                // use state variable filter rather than biquad
     bool bypass;                 // skip processing if true
 } Biquad;
 #else
