@@ -31,8 +31,6 @@ void dsp_update_delay_samples(float sample_rate);
 // Optimized processing function
 #if PICO_RP2350
 float dsp_process_channel(Biquad * __restrict biquads, float input, uint8_t channel);
-void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict samples,
-                               uint32_t count, uint8_t channel);
 void dsp_process_channel_block_svf(Biquad * __restrict biquads, float * __restrict samples,
                                uint32_t count, uint8_t channel);
 void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __restrict samples,

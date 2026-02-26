@@ -1,7 +1,6 @@
 #include <math.h>
 #include <string.h>
 #include "dsp_pipeline.h"
-#include "dcp_inline.h"
 
 static inline bool is_filter_flat(const EqParamPacket *p) {
     if (p->type == FILTER_FLAT) return true;
@@ -212,73 +211,6 @@ void dsp_recalculate_all_filters(float sample_rate) {
 }
 
 #if PICO_RP2350
-DSP_TIME_CRITICAL
-float dsp_process_channel(Biquad * __restrict biquads, float input, uint8_t channel) {
-    float sample = input;
-    uint8_t count = channel_band_counts[channel];
-    for (int i = 0; i < count; i++) {
-        Biquad *bq = &biquads[i];
-        if (bq->bypass) continue;
-
-        // Mixed Precision: Float Multiplies, Double Accumulation
-        // y[n] = b0*x[n] + s1[n-1]
-        float result_f = dcp_dadd_d2f(dcp_f2d(bq->b0 * sample), bq->s1);
-
-        // s1[n] = b1*x[n] - a1*y[n] + s2[n-1]
-        float val1 = bq->b1 * sample - bq->a1 * result_f;
-        bq->s1 = dcp_dadd(dcp_f2d(val1), bq->s2);
-
-        // s2[n] = b2*x[n] - a2*y[n]
-        float val2 = bq->b2 * sample - bq->a2 * result_f;
-        bq->s2 = dcp_f2d(val2);
-
-        sample = result_f;
-    }
-    return sample;
-}
-
-DSP_TIME_CRITICAL
-void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict samples,
-                               uint32_t count, uint8_t channel) {
-    uint8_t num_bands = channel_band_counts[channel];
-
-    // Process each biquad across all samples (coefficients loaded once per filter)
-    for (int band = 0; band < num_bands; band++) {
-        Biquad *bq = &biquads[band];
-        if (bq->bypass) continue;
-
-        // Load coefficients once for all samples
-        float b0 = bq->b0;
-        float b1 = bq->b1;
-        float b2 = bq->b2;
-        float a1 = bq->a1;
-        float a2 = bq->a2;
-        double s1 = bq->s1;
-        double s2 = bq->s2;
-
-        // Process all samples with this biquad
-        for (uint32_t i = 0; i < count; i++) {
-            float sample = samples[i];
-
-            // y[n] = b0*x[n] + s1[n-1]
-            float result_f = dcp_dadd_d2f(dcp_f2d(b0 * sample), s1);
-
-            // s1[n] = b1*x[n] - a1*y[n] + s2[n-1]
-            float val1 = b1 * sample - a1 * result_f;
-            s1 = dcp_dadd(dcp_f2d(val1), s2);
-
-            // s2[n] = b2*x[n] - a2*y[n]
-            s2 = dcp_f2d(b2 * sample - a2 * result_f);
-
-            samples[i] = result_f;
-        }
-
-        // Store state back
-        bq->s1 = s1;
-        bq->s2 = s2;
-    }
-}
-
 // See https://www.cytomic.com/files/dsp/SvfLinearTrapOptimised2.pdf
 DSP_TIME_CRITICAL
 void dsp_process_channel_block_svf(Biquad * __restrict biquads, float * __restrict samples,
@@ -341,8 +273,8 @@ void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __res
         float b2 = bq->b2;
         float a1 = bq->a1;
         float a2 = bq->a2;
-        float s1 = dcp_d2f(bq->s1);     //TODO - if the single precision filter is
-        float s2 = dcp_d2f(bq->s2);     //good enough, change these state vars to floats
+        float s1 = bq->s1;
+        float s2 = bq->s2;
 
         float *sample = samples;
         float result_f, val1;
@@ -365,8 +297,8 @@ void dsp_process_channel_block_single(Biquad * __restrict biquads, float * __res
         }
 
         // Store state back
-        bq->s1 = dcp_f2d(s1);
-        bq->s2 = dcp_f2d(s2);
+        bq->s1 = s1;
+        bq->s2 = s2;
     }
 }
 

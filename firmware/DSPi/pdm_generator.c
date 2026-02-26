@@ -447,7 +447,7 @@ static void __not_in_flash_func(eq_worker_loop)() {
             if (!matrix_mixer.outputs[out].mute) {
                 uint8_t eq_ch = CH_OUT_1 + out;
                 if (!channel_bypassed[eq_ch]) {
-                    dsp_process_channel_block(filters[eq_ch], buf_out[out], sample_count, eq_ch);
+                    dsp_process_channel_block_single(filters[eq_ch], buf_out[out], sample_count, eq_ch);
                 }
             }
 
