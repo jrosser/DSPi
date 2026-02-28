@@ -111,6 +111,7 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
 
 #if PICO_RP2350
     // Float storage for state variable filter coefficients
+    bq->svf_type = p->type;
     bq->sva1 = sva1_f;
     bq->sva2 = sva2_f;
     bq->sva3 = sva3_f;
@@ -332,21 +333,62 @@ void dsp_process_channel_block_hybrid(Biquad * __restrict biquads, float * __res
             float svic1eq = bq->svic1eq;
             float svic2eq = bq->svic2eq;
 
-            // this doesnt end up in a register otherwise
-            register float two_f = 2.0f;
-
-            sample = samples;
-            // Process all samples with this state variable filter
             uint32_t i=0;
-            do {
-                float svf_in = *sample;
-                float v3 = svf_in - svic2eq;
-                float v1 = sva1 * svic1eq + sva2 * v3;
-                float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
-                svic1eq = two_f * v1 - svic1eq;
-                svic2eq = two_f * v2 - svic2eq;
-                *sample++ = svm0 * svf_in + svm1 * v1 + svm2 * v2;
-            } while(++i < count);
+            sample = samples;
+
+            // Process all samples with the most efficient filter implementation for the filter type
+            switch(bq->svf_type) {
+                case FILTER_LOWPASS:
+                    //m0=0.0 m1=0.0 m2=1.0
+                    do {
+                        float svf_in = *sample;
+                        float v3 = svf_in - svic2eq;
+                        float v1 = sva1 * svic1eq + sva2 * v3;
+                        float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
+                        svic1eq = 2.0f * v1 - svic1eq;
+                        svic2eq = 2.0f * v2 - svic2eq;
+                        *sample++ = v2;
+                    } while(++i < count);
+                    break;
+                case FILTER_HIGHPASS:
+                    //m0=1.0 m2=-1.0
+                    do {
+                        float svf_in = *sample;
+                        float v3 = svf_in - svic2eq;
+                        float v1 = sva1 * svic1eq + sva2 * v3;
+                        float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
+                        svic1eq = 2.0f * v1 - svic1eq;
+                        svic2eq = 2.0f * v2 - svic2eq;
+                        *sample++ = svf_in + svm1*v1 - v2;
+                    } while(++i < count);
+                    break;
+                case FILTER_PEAKING:
+                    //m0=1.0 m2=0.0
+                     do {
+                        float svf_in = *sample;
+                        float v3 = svf_in - svic2eq;
+                        float v1 = sva1 * svic1eq + sva2 * v3;
+                        float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
+                        svic1eq = 2.0f * v1 - svic1eq;
+                        svic2eq = 2.0f * v2 - svic2eq;
+                        *sample++ = svf_in + svm1*v1;
+                    } while(++i < count);
+                    break;
+                case FILTER_HIGHSHELF:
+                case FILTER_LOWSHELF:
+                default:
+                    //m0, m1, m2 are fractional values
+                    do {
+                        float svf_in = *sample;
+                        float v3 = svf_in - svic2eq;
+                        float v1 = sva1 * svic1eq + sva2 * v3;
+                        float v2 = svic2eq + sva2 * svic1eq + sva3 * v3;
+                        svic1eq = 2.0f * v1 - svic1eq;
+                        svic2eq = 2.0f * v2 - svic2eq;
+                        *sample++ = svm0*svf_in + svm1*v1 + svm2*v2;
+                    } while(++i < count);
+                    break;
+            }
 
             // Store state back
             bq->svic1eq = svic1eq;

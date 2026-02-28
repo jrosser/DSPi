@@ -312,6 +312,7 @@ typedef struct {
     // state variable filter
     float sva1, sva2, sva3, svm0, svm1, svm2; // state variable filter coefficients
     float svic1eq, svic2eq;                   // state variable filter state vars
+    uint32_t svf_type;                        // indicate svf filter type to select best algorithm
 
     bool use_svf;                // use state variable filter rather than biquad
     bool bypass;                 // skip processing if true
