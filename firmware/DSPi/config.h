@@ -319,7 +319,7 @@ typedef struct {
     float s1, s2;                              // single-precision state (was double)
 
     // SVF coefficients and state
-    float sva1, sva2, sva3;                    // integrator coefficients
+    float svgt0, svgt1, svgt2, svgk0, svgk1;   // integrator coefficients
     float svm0, svm1, svm2;                    // output mix coefficients
     float svic1eq, svic2eq;                    // integrator state
     uint32_t svf_type;                         // FilterType enum for inner loop specialization

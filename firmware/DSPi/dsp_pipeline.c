@@ -63,7 +63,8 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
         bq->bypass = true;
 #if PICO_RP2350
         bq->b0 = 1.0f; bq->b1 = 0.0f; bq->b2 = 0.0f; bq->a1 = 0.0f; bq->a2 = 0.0f;
-        bq->sva1 = 0.0f; bq->sva2 = 0.0f; bq->sva3 = 0.0f;
+        bq->svgt0 = 0.0f; bq->svgt1 = 0.0f; bq->svgt2 = 0.0f;
+        bq->svgk0 = 0.0f; bq->svgk1 = 0.0f;
         bq->svm0 = 0.0f; bq->svm1 = 0.0f; bq->svm2 = 0.0f;
         bq->use_svf = false;
 #else
@@ -94,41 +95,47 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
     if (bq->use_svf) {
         // SVF coefficients (Simper, "SvfLinearTrapAllOutputs", Cytomic 2021)
         // Shelf k = 1/Q matches RBJ Audio-EQ-Cookbook response exactly.
-        float g = tanf(3.1415926535f * p->freq / sample_rate);
-        float k = 1.0f / p->Q;
+        float g0 = tanf(3.1415926535f * p->freq / sample_rate);
+        float k0 = 1.0f / p->Q;
+        float k = k0;
+        float g = g0;
 
         switch (p->type) {
             case FILTER_PEAKING:
-                k = 1.0f / (p->Q * A);
+                k = k0 / A;
                 break;
             case FILTER_LOWSHELF: {
                 float sqrtA = sqrtf(A);
-                g = g / sqrtA;
+                g = g0 / sqrtA;
                 break;
             }
             case FILTER_HIGHSHELF: {
                 float sqrtA = sqrtf(A);
-                g = g * sqrtA;
+                g = g0 * sqrtA;
                 break;
             }
-            default: break;
+            default:
+            break;
         }
 
-        float sva1_f = 1.0f / (1.0f + g * (g + k));
-        float sva2_f = g * sva1_f;
-        float sva3_f = g * sva2_f;
+        float gk = g + k;
+        float gt0 = 1.0f/(1.0f + (g * gk));
+        float gk0 = gk * gt0;
+        float gt1 = g * gt0;
+        float gk1 = g * gk0;
+        float gt2 = g * gt1;
 
         float svm0_f = 0.0f, svm1_f = 0.0f, svm2_f = 0.0f;
         switch (p->type) {
-            case FILTER_LOWPASS:   svm0_f = 0.0f; svm1_f = 0.0f;            svm2_f = 1.0f;       break;
-            case FILTER_HIGHPASS:  svm0_f = 1.0f; svm1_f = -k;              svm2_f = -1.0f;      break;
-            case FILTER_PEAKING:   svm0_f = 1.0f; svm1_f = k*(A*A - 1.0f);  svm2_f = 0.0f;       break;
-            case FILTER_LOWSHELF:  svm0_f = 1.0f; svm1_f = k*(A - 1.0f);    svm2_f = A*A - 1.0f; break;
-            case FILTER_HIGHSHELF: svm0_f = A*A;  svm1_f = k*(1.0f-A)*A;    svm2_f = 1.0f - A*A; break;
+            case FILTER_LOWPASS:   svm0_f = 0.0f; svm1_f = 0.0f; svm2_f = 1.0f; break;
+            case FILTER_HIGHPASS:  svm0_f = 1.0f; svm1_f = 0.0f; svm2_f = 0.0f; break;
+            case FILTER_PEAKING:   svm0_f = 1.0f; svm1_f = k0*A; svm2_f = 1.0f; break;
+            case FILTER_LOWSHELF:  svm0_f = 1.0f; svm1_f = k0*A; svm2_f = A*A;  break;
+            case FILTER_HIGHSHELF: svm0_f = A*A;  svm1_f = k0*A; svm2_f = 1.0f; break;
             default: break;
         }
 
-        bq->sva1 = sva1_f; bq->sva2 = sva2_f; bq->sva3 = sva3_f;
+        bq->svgt0 = gt0; bq->svgt1 = gt1; bq->svgt2 = gt2; bq->svgk0 = gk0; bq->svgk1 = gk1;
         bq->svm0 = svm0_f; bq->svm1 = svm1_f; bq->svm2 = svm2_f;
         bq->svf_type = p->type;
 
@@ -138,7 +145,7 @@ void dsp_compute_coefficients(EqParamPacket *p, Biquad *bq, float sample_rate) {
     }
 
     // Clear SVF coefficients for biquad path
-    bq->sva1 = 0.0f; bq->sva2 = 0.0f; bq->sva3 = 0.0f;
+    bq->svgt0 = 0.0f; bq->svgt1 = 0.0f; bq->svgt2 = 0.0f; bq->svgk0 = 0.0f; bq->svgk1 = 0.0f;
     bq->svm0 = 0.0f; bq->svm1 = 0.0f; bq->svm2 = 0.0f;
 #endif
 
@@ -266,12 +273,15 @@ float dsp_process_channel(Biquad * __restrict biquads, float input, uint8_t chan
         if (bq->bypass) continue;
 
         if (bq->use_svf) {
-            float v3 = sample - bq->svic2eq;
-            float v1 = bq->sva1 * bq->svic1eq + bq->sva2 * v3;
-            float v2 = bq->svic2eq + bq->sva2 * bq->svic1eq + bq->sva3 * v3;
-            bq->svic1eq = 2.0f * v1 - bq->svic1eq;
-            bq->svic2eq = 2.0f * v2 - bq->svic2eq;
-            sample = bq->svm0 * sample + bq->svm1 * v1 + bq->svm2 * v2;
+            float t0 = sample - bq->svic1eq;
+            float v0 = bq->svgt0*t0 + bq->svgk0*bq->svic1eq;
+            float t1 = bq->svgt1*t0 - bq->svgk1*bq->svic1eq;
+            float t2 = bq->svgt2*t0 + bq->svgt1*bq->svic1eq;
+            float v1 = bq->svic1eq + t1;
+            float v2 = bq->svic2eq + t2;
+            bq->svic1eq = v1 + 2.0f * t1;
+            bq->svic2eq = v2 + 2.0f * t2;
+            sample = bq->svm0 * v0 + bq->svm1 * v1 + bq->svm2 * v2;
         } else {
             float out = bq->b0 * sample + bq->s1;
             bq->s1 = bq->b1 * sample - bq->a1 * out + bq->s2;
@@ -293,7 +303,7 @@ void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict s
 
         if (bq->use_svf) {
             // Load SVF coefficients
-            float a1 = bq->sva1, a2 = bq->sva2, a3 = bq->sva3;
+            float gt0 = bq->svgt0, gt1 = bq->svgt1, gt2 = bq->svgt2, gk0 = bq->svgk0, gk1 = bq->svgk1;
             float m0 = bq->svm0, m1 = bq->svm1, m2 = bq->svm2;
             float ic1eq = bq->svic1eq, ic2eq = bq->svic2eq;
             float *sp = samples;
@@ -303,45 +313,85 @@ void dsp_process_channel_block(Biquad * __restrict biquads, float * __restrict s
                 case FILTER_LOWPASS:
                     for (uint32_t i = 0; i < count; i++) {
                         float in = *sp;
-                        float v3 = in - ic2eq;
-                        float v1 = a1 * ic1eq + a2 * v3;
-                        float v2 = ic2eq + a2 * ic1eq + a3 * v3;
-                        ic1eq = 2.0f * v1 - ic1eq;
-                        ic2eq = 2.0f * v2 - ic2eq;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
                         *sp++ = v2;
                     }
                     break;
                 case FILTER_HIGHPASS:
                     for (uint32_t i = 0; i < count; i++) {
                         float in = *sp;
-                        float v3 = in - ic2eq;
-                        float v1 = a1 * ic1eq + a2 * v3;
-                        float v2 = ic2eq + a2 * ic1eq + a3 * v3;
-                        ic1eq = 2.0f * v1 - ic1eq;
-                        ic2eq = 2.0f * v2 - ic2eq;
-                        *sp++ = in + m1 * v1 - v2;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
+                        *sp++ = v0;
                     }
                     break;
                 case FILTER_PEAKING:
                     for (uint32_t i = 0; i < count; i++) {
                         float in = *sp;
-                        float v3 = in - ic2eq;
-                        float v1 = a1 * ic1eq + a2 * v3;
-                        float v2 = ic2eq + a2 * ic1eq + a3 * v3;
-                        ic1eq = 2.0f * v1 - ic1eq;
-                        ic2eq = 2.0f * v2 - ic2eq;
-                        *sp++ = in + m1 * v1;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
+                        *sp++ = v0 + m1 * v1 + v2;
+                    }
+                    break;
+                case FILTER_LOWSHELF:
+                    for (uint32_t i = 0; i < count; i++) {
+                        float in = *sp;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
+                        *sp++ = v0 + m1 * v1 + m2 * v2;
+                    }
+                    break;
+                case FILTER_HIGHSHELF:
+                    for (uint32_t i = 0; i < count; i++) {
+                        float in = *sp;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
+                        *sp++ = v0 + m1 * v1 + v2;
                     }
                     break;
                 default: // FILTER_LOWSHELF, FILTER_HIGHSHELF
                     for (uint32_t i = 0; i < count; i++) {
                         float in = *sp;
-                        float v3 = in - ic2eq;
-                        float v1 = a1 * ic1eq + a2 * v3;
-                        float v2 = ic2eq + a2 * ic1eq + a3 * v3;
-                        ic1eq = 2.0f * v1 - ic1eq;
-                        ic2eq = 2.0f * v2 - ic2eq;
-                        *sp++ = m0 * in + m1 * v1 + m2 * v2;
+                        float t0 = in - ic1eq;
+                        float v0 = gt0*t0 + gk0*ic1eq;
+                        float t1 = gt1*t0 - gk1*ic1eq;
+                        float t2 = gt2*t0 + gt1*ic1eq;
+                        float v1 = ic1eq + t1;
+                        float v2 = ic2eq + t2;
+                        ic1eq = v1 + 2.0f * t1;
+                        ic2eq = v2 + 2.0f * t2;
+                        *sp++ = m0 * v0 + m1 * v1 + m2 * v2;
                     }
                     break;
             }
