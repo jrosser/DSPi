@@ -119,6 +119,8 @@ void bulk_params_collect(WireBulkParams *out) {
     for (int o = 0; o < NUM_OUTPUT_CHANNELS; o++) {
         out->outputs[o].enabled = matrix_mixer.outputs[o].enabled;
         out->outputs[o].mute = matrix_mixer.outputs[o].mute;
+        out->outputs[o].tpdf_dither = matrix_mixer.outputs[o].tpdf_dither;
+        out->outputs[o].truncate = matrix_mixer.outputs[o].truncate;
         out->outputs[o].gain_db = matrix_mixer.outputs[o].gain_db;
         out->outputs[o].delay_ms = matrix_mixer.outputs[o].delay_ms;
     }
@@ -275,6 +277,8 @@ int bulk_params_apply(const WireBulkParams *in, bool apply_pins) {
         matrix_mixer.outputs[o].gain_db = in->outputs[o].gain_db;
         matrix_mixer.outputs[o].gain_linear = db_to_linear(in->outputs[o].gain_db);
         matrix_mixer.outputs[o].delay_ms = in->outputs[o].delay_ms;
+        matrix_mixer.outputs[o].tpdf_dither = in->outputs[o].tpdf_dither;
+        matrix_mixer.outputs[o].truncate = in->outputs[o].truncate;
         channel_delays_ms[CH_OUT_1 + o] = in->outputs[o].delay_ms;
     }
 

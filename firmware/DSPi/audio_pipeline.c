@@ -25,6 +25,7 @@
 #include "hardware/timer.h"
 #include "hardware/sync.h"
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 // spdif0_consumer_fill is defined in usb_audio.c and read by main.c
@@ -432,11 +433,61 @@ void __not_in_flash_func(process_input_block)(uint32_t sample_count) {
                 memset(audio_buf[0]->buffer->bytes, 0, sample_count * 8);
             } else {
                 int32_t *out_ptr = (int32_t *)audio_buf[0]->buffer->bytes;
+                int32_t dither_l = 0x00000001 << (32 - matrix_mixer.outputs[left_ch].tpdf_dither);
+                int32_t truncate_l = 0xFFFFFFFF << (32 - matrix_mixer.outputs[left_ch].truncate);
+                int32_t dither_r = 0x00000001 << (32 - matrix_mixer.outputs[right_ch].tpdf_dither);
+                int32_t truncate_r = 0xFFFFFFFF << (32 - matrix_mixer.outputs[right_ch].truncate);
                 for (uint32_t i = 0; i < sample_count; i++) {
-                    float dl = fmaxf(-1.0f, fminf(1.0f, buf_out[0][i]));
-                    float dr = fmaxf(-1.0f, fminf(1.0f, buf_out[1][i]));
-                    out_ptr[i*2]   = (int32_t)(dl * 8388607.0f);
-                    out_ptr[i*2+1] = (int32_t)(dr * 8388607.0f);
+
+                    // Clip floats to +/- 1.0
+                    float dl = buf_out[left_ch][i]; if(dl<-1.0f) dl = -1.0f; if(dl>1.0f) dl = 1.0f;
+                    float dr = buf_out[right_ch][i]; if(dr<-1.0f) dr = -1.0f; if(dr>1.0f) dr = 1.0f;
+
+                    // Scale up to 24 bit
+                    // Use 2^N rather than (2^N)-1 to avoid scaling error
+                    dl = dl * 8388608.0f; dr = dr * 8388608.0f;
+
+                    // Convert floats to int32_t, round downward (default with C cast or vcvt would be toward-zero)
+                    // round-downward leaves no dead-zone, toward-zero has fractional values between +1.0f and -1.0f become 0
+                    // don't use fesetround as this adjusts the FPU global state and is interrupt-unfriendly
+                    int32_t int_l, int_r;
+                    __asm__ volatile (
+                        "vcvtm.s32.f32 %[DL], %[DL]\n\t"
+                        "vmov %[INT_L], %[DL]\n\t"
+                        "vcvtm.s32.f32 %[DR], %[DR]\n\t"
+                        "vmov %[INT_R], %[DR]\n\t"
+                        : [INT_L] "=r" (int_l),
+                          [INT_R] "=r" (int_r)
+                        : [DL] "w" (dl),
+                          [DR] "w" (dr)
+                    );
+
+                    // TPDF dither
+                    if(matrix_mixer.outputs[left_ch].tpdf_dither) {
+                        int32_t r1 = rand();
+                        int32_t r2 = rand();
+                        int_l += r1 % 2 ? dither_l : 0;
+                        int_l -= r2 % 2 ? dither_l : 0;
+                    }
+                    if(matrix_mixer.outputs[right_ch].tpdf_dither) {
+                        int32_t r1 = rand();
+                        int32_t r2 = rand();
+                        int_r += r1 % 2 ? dither_r : 0;
+                        int_r -= r2 % 2 ? dither_r : 0;
+                    }
+
+                    // Clip integer values to those allowed in original 24 bit 2's complement input
+                    if(int_l > 8388607) int_l = 8388607; if(int_l < -8388608) int_l = -8388608;
+                    if(int_r > 8388607) int_r = 8388607; if(int_r < -8388608) int_r = -8388608;
+
+                    // Word Length Truncation
+                    if(matrix_mixer.outputs[left_ch].truncate)
+                        int_l &= truncate_l;
+                    if(matrix_mixer.outputs[right_ch].truncate)
+                        int_r &= truncate_r;
+
+                    out_ptr[i*2]   = int_l;
+                    out_ptr[i*2+1] = int_r;
                 }
             }
         }
@@ -525,11 +576,61 @@ void __not_in_flash_func(process_input_block)(uint32_t sample_count) {
                 continue;
             }
             int32_t *out_ptr = (int32_t *)audio_buf[pair]->buffer->bytes;
+            int32_t dither_l = 0x00000001 << (32 - matrix_mixer.outputs[left_ch].tpdf_dither);
+            int32_t truncate_l = 0xFFFFFFFF << (32 - matrix_mixer.outputs[left_ch].truncate);
+            int32_t dither_r = 0x00000001 << (32 - matrix_mixer.outputs[right_ch].tpdf_dither);
+            int32_t truncate_r = 0xFFFFFFFF << (32 - matrix_mixer.outputs[right_ch].truncate);
             for (uint32_t i = 0; i < sample_count; i++) {
-                float dl = fmaxf(-1.0f, fminf(1.0f, buf_out[left_ch][i]));
-                float dr = fmaxf(-1.0f, fminf(1.0f, buf_out[right_ch][i]));
-                out_ptr[i*2]     = (int32_t)(dl * 8388607.0f);
-                out_ptr[i*2+1]   = (int32_t)(dr * 8388607.0f);
+
+                // Clip floats to +/- 1.0
+                float dl = buf_out[left_ch][i]; if(dl<-1.0f) dl = -1.0f; if(dl>1.0f) dl = 1.0f;
+                float dr = buf_out[right_ch][i]; if(dr<-1.0f) dr = -1.0f; if(dr>1.0f) dr = 1.0f;
+
+                // Scale up to 24 bit
+                // Use 2^N rather than (2^N)-1 to avoid scaling error
+                dl = dl * 8388608.0f; dr = dr * 8388608.0f;
+
+                // Convert floats to int32_t, round downward (default with C cast or vcvt would be toward-zero)
+                // round-downward leaves no dead-zone, toward-zero has fractional values between +1.0f and -1.0f become 0
+                // don't use fesetround as this adjusts the FPU global state and is interrupt-unfriendly
+                int32_t int_l, int_r;
+                __asm__ volatile (
+                    "vcvtm.s32.f32 %[DL], %[DL]\n\t"
+                    "vmov %[INT_L], %[DL]\n\t"
+                    "vcvtm.s32.f32 %[DR], %[DR]\n\t"
+                    "vmov %[INT_R], %[DR]\n\t"
+                    : [INT_L] "=r" (int_l),
+                        [INT_R] "=r" (int_r)
+                    : [DL] "w" (dl),
+                        [DR] "w" (dr)
+                );
+
+                // TPDF dither
+                if(matrix_mixer.outputs[left_ch].tpdf_dither) {
+                    int32_t r1 = rand();
+                    int32_t r2 = rand();
+                    int_l += r1 % 2 ? dither_l : 0;
+                    int_l -= r2 % 2 ? dither_l : 0;
+                }
+                if(matrix_mixer.outputs[right_ch].tpdf_dither) {
+                    int32_t r1 = rand();
+                    int32_t r2 = rand();
+                    int_r += r1 % 2 ? dither_r : 0;
+                    int_r -= r2 % 2 ? dither_r : 0;
+                }
+
+                // Clip integer values to those allowed in original 24 bit 2's complement input
+                if(int_l > 8388607) int_l = 8388607; if(int_l < -8388608) int_l = -8388608;
+                if(int_r > 8388607) int_r = 8388607; if(int_r < -8388608) int_r = -8388608;
+
+                // Word Length Truncation
+                if(matrix_mixer.outputs[left_ch].truncate)
+                    int_l &= truncate_l;
+                if(matrix_mixer.outputs[right_ch].truncate)
+                    int_r &= truncate_r;
+
+                out_ptr[i*2]   = int_l;
+                out_ptr[i*2+1] = int_r;
             }
         }
 

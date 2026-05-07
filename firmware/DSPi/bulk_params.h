@@ -110,7 +110,8 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint8_t  enabled;
     uint8_t  mute;
-    uint8_t  reserved[2];
+    uint8_t  tpdf_dither;
+    uint8_t  truncate;
     float    gain_db;
     float    delay_ms;
 } WireOutputChannel;                 // 12 bytes

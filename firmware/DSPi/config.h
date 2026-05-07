@@ -182,6 +182,14 @@ extern volatile uint32_t nominal_feedback_10_14;
 // Clip Detection Commands
 #define REQ_CLEAR_CLIPS             0x83
 
+// TPDF Dither Commands
+#define REQ_SET_OUTPUT_TPDF         0x84
+#define REQ_GET_OUTPUT_TPDF         0x85
+
+// Output Truncation Commands
+#define REQ_SET_OUTPUT_TRUNCATE     0x86
+#define REQ_GET_OUTPUT_TRUNCATE     0x87
+
 // Preset System Commands
 #define REQ_PRESET_SAVE             0x90
 #define REQ_PRESET_LOAD             0x91
@@ -435,7 +443,8 @@ typedef struct __attribute__((packed)) {
 typedef struct __attribute__((packed)) {
     uint8_t enabled;        // Output active (saves CPU when disabled)
     uint8_t mute;           // Soft mute
-    uint8_t reserved[2];
+    uint8_t tpdf_dither;    // Per-output triangular dither bit position (0 to disable)
+    uint8_t truncate;       // Per-output bit depth truncation position (0 to disable)
     float gain_db;          // Per-output gain (-inf to +12dB)
     float gain_linear;      // Pre-computed
     float delay_ms;         // Per-output delay

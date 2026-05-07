@@ -519,11 +519,45 @@ static void __not_in_flash_func(eq_worker_loop)() {
                 memset(out_ptr, 0, sample_count * 8);
                 continue;
             }
+            int32_t dither_l = 0x00000001 << (32 - matrix_mixer.outputs[left_out].tpdf_dither);
+            int32_t truncate_l = 0xFFFFFFFF << (32 - matrix_mixer.outputs[left_out].truncate);
+            int32_t dither_r = 0x00000001 << (32 - matrix_mixer.outputs[right_out].tpdf_dither);
+            int32_t truncate_r = 0xFFFFFFFF << (32 - matrix_mixer.outputs[right_out].truncate);
             for (uint32_t i = 0; i < sample_count; i++) {
-                float dl = fmaxf(-1.0f, fminf(1.0f, buf_out[left_out][i]));
-                float dr = fmaxf(-1.0f, fminf(1.0f, buf_out[right_out][i]));
-                out_ptr[i*2]   = (int32_t)(dl * 8388607.0f);
-                out_ptr[i*2+1] = (int32_t)(dr * 8388607.0f);
+                // Clip floats to +/- 1.0
+                float dl = buf_out[left_out][i]; if(dl<-1.0f) dl = -1.0f; if(dl>1.0f) dl = 1.0f;
+                float dr = buf_out[right_out][i]; if(dr<-1.0f) dr = -1.0f; if(dr>1.0f) dr = 1.0f;
+
+                // Scale up to 24 bit
+                int32_t int_l = (int32_t)(dl * 8388608.0f);
+                int32_t int_r = (int32_t)(dr * 8388608.0f);
+
+                // TPDF dither
+                if(matrix_mixer.outputs[left_out].tpdf_dither) {
+                    int32_t r1 = rand();
+                    int32_t r2 = rand();
+                    int_l += r1 % 2 ? dither_l : 0;
+                    int_l -= r2 % 2 ? dither_l : 0;
+                }
+                if(matrix_mixer.outputs[right_out].tpdf_dither) {
+                    int32_t r1 = rand();
+                    int32_t r2 = rand();
+                    int_r += r1 % 2 ? dither_r : 0;
+                    int_r -= r2 % 2 ? dither_r : 0;
+                }
+
+                // Clip integer values
+                if(int_l > 8388607) int_l = 8388607; if(int_l < -8388608) int_l = -8388608;
+                if(int_r > 8388607) int_r = 8388607; if(int_r < -8388608) int_r = -8388608;
+
+                // Word Length Truncation
+                if(matrix_mixer.outputs[left_out].truncate)
+                    int_l &= truncate_l;
+                if(matrix_mixer.outputs[right_out].truncate)
+                    int_r &= truncate_r;
+
+                out_ptr[i*2]   = int_l;
+                out_ptr[i*2+1] = int_r;
             }
         }
 

@@ -613,6 +613,32 @@ static void vendor_handle_set_data(tusb_control_request_t const *req) {
             break;
         }
 
+        case REQ_SET_OUTPUT_TPDF: {
+            uint8_t out = vendor_last_wValue & 0xFF;
+            if (out < NUM_OUTPUT_CHANNELS && buffer->data_len >= 1) {
+                matrix_mixer.outputs[out].tpdf_dither = vendor_rx_buf[0];
+                uint8_t v = vendor_rx_buf[0];
+                uint16_t off = (uint16_t)(offsetof(WireBulkParams, outputs)
+                    + (uint16_t)out * sizeof(WireOutputChannel)
+                    + offsetof(WireOutputChannel, tpdf_dither));
+                notify_param_write(off, 1, &v);
+            }
+            break;
+        }
+
+        case REQ_SET_OUTPUT_TRUNCATE: {
+            uint8_t out = vendor_last_wValue & 0xFF;
+            if (out < NUM_OUTPUT_CHANNELS && buffer->data_len >= 1) {
+                matrix_mixer.outputs[out].truncate = vendor_rx_buf[0];
+                uint8_t v = vendor_rx_buf[0];
+                uint16_t off = (uint16_t)(offsetof(WireBulkParams, outputs)
+                    + (uint16_t)out * sizeof(WireOutputChannel)
+                    + offsetof(WireOutputChannel, truncate));
+                notify_param_write(off, 1, &v);
+            }
+            break;
+        }
+
         case REQ_SET_OUTPUT_DELAY: {
             uint8_t out = vendor_last_wValue & 0xFF;
             if (out < NUM_OUTPUT_CHANNELS && buffer->data_len >= 4) {
@@ -1093,6 +1119,26 @@ static bool vendor_handle_get(tusb_control_request_t const *req) {
                 uint8_t out = (uint8_t)setup->wValue;
                 if (out < NUM_OUTPUT_CHANNELS) {
                     resp_buf[0] = matrix_mixer.outputs[out].mute;
+                    vendor_send_response(resp_buf, 1);
+                    return true;
+                }
+                return false;
+            }
+
+            case REQ_GET_OUTPUT_TPDF: {
+                uint8_t out = (uint8_t)setup->wValue;
+                if (out < NUM_OUTPUT_CHANNELS) {
+                    resp_buf[0] = matrix_mixer.outputs[out].tpdf_dither;
+                    vendor_send_response(resp_buf, 1);
+                    return true;
+                }
+                return false;
+            }
+
+            case REQ_GET_OUTPUT_TRUNCATE: {
+                uint8_t out = (uint8_t)setup->wValue;
+                if (out < NUM_OUTPUT_CHANNELS) {
+                    resp_buf[0] = matrix_mixer.outputs[out].truncate;
                     vendor_send_response(resp_buf, 1);
                     return true;
                 }
