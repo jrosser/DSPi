@@ -115,6 +115,8 @@ extern uint8_t output_types[];  // usb_audio.c; slot 0 type selects starvation s
 // first.  Entry level 1 is the complement (XOR 0x3FF).  Built at init; BSS
 // so the hot path never touches flash.
 static uint16_t adat_token_lut[256];
+static uint16_t adat_token_lut2[256];
+
 
 // NRZI'd 16-bit frame header [1][10x0][1][u3..u0] per entry level, with the
 // exit level each variant leaves the line at.
@@ -126,29 +128,125 @@ static uint32_t adat_hdr_exit[2];
 // the line level (0/1) at the frame start; returns the exit level.  The
 // level chains through the tokens as an XOR mask m (0 or 0x3FF): each
 // token's LSB is the line level during its last bit.
-static inline uint32_t adat_encode_frame(uint32_t *w, const int32_t s24[8],
+static inline uint32_t adat_encode_frame(uint32_t *w, const int32_t *s24, uint32_t s24_stride,
                                          uint32_t entry) {
+
     uint32_t hdr = adat_hdr_nrzi[entry];
-    uint32_t m = (0u - adat_hdr_exit[entry]) & 0x3FFu;
-    uint32_t c[8];
-    for (int ch = 0; ch < 8; ch++) {
-        uint32_t s = (uint32_t)s24[ch];
-        uint32_t t2 = adat_token_lut[(s >> 16) & 0xFFu] ^ m;
-        m = (0u - (t2 & 1u)) & 0x3FFu;
-        uint32_t t1 = adat_token_lut[(s >> 8) & 0xFFu] ^ m;
-        m = (0u - (t1 & 1u)) & 0x3FFu;
-        uint32_t t0 = adat_token_lut[s & 0xFFu] ^ m;
-        m = (0u - (t0 & 1u)) & 0x3FFu;
-        c[ch] = (t2 << 20) | (t1 << 10) | t0;
-    }
-    w[0] = (hdr << 16)  | (c[0] >> 14);
-    w[1] = (c[0] << 18) | (c[1] >> 12);
-    w[2] = (c[1] << 20) | (c[2] >> 10);
-    w[3] = (c[2] << 22) | (c[3] >> 8);
-    w[4] = (c[3] << 24) | (c[4] >> 6);
-    w[5] = (c[4] << 26) | (c[5] >> 4);
-    w[6] = (c[5] << 28) | (c[6] >> 2);
-    w[7] = (c[6] << 30) |  c[7];
+    uint32_t m = adat_hdr_exit[entry] & 1u;
+    uint32_t s, t0, t1, t2, c;
+    const uint32_t *s24_p = s24;
+
+    // 0
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[0] = (hdr << 16)  | (c >> 14);
+    w[1] = c << 18;
+
+    // 1
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[1] |= (c >> 12);
+    w[2] = (c << 20);
+
+    // 2
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[2] |= (c >> 10);
+    w[3] = (c << 22);
+
+    // 3
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[3] |= (c >> 8);
+    w[4] = (c << 24);
+
+    // 4
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[4] |= (c >> 6);
+    w[5] = (c << 26);
+
+    // 5
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[5] |= (c >> 4);
+    w[6] = (c << 28);
+
+    // 6
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[6] |= (c >> 2);   
+    w[7] = (c << 30);
+
+    // 7
+    s = (uint32_t)*s24_p;
+    s24_p += s24_stride;
+    t2 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t2 & 1u;
+    t1 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t1 & 1u;
+    t0 = (m) ? adat_token_lut2[(s >> 16) & 0xFFu] : adat_token_lut[(s >> 16) & 0xFFu];
+    m = t0 & 1u;
+    c = (t2 << 20) | (t1 << 10) | t0;
+
+    w[7] |= c;
+
     return m & 1u;
 }
 
@@ -309,6 +407,7 @@ void adat_output_init(void) {
             t = (t << 1) | l;
         }
         adat_token_lut[b] = (uint16_t)t;
+        adat_token_lut2[b] = (uint16_t)t ^ 0x3FF;
     }
     // Header variants per entry level.
     for (uint32_t lvl = 0; lvl < 2; lvl++) {
@@ -321,10 +420,10 @@ void adat_output_init(void) {
         adat_hdr_exit[lvl] = l;
     }
     // Silence frames per entry level, via the same encoder as live audio.
-    const int32_t zero[8] = {0};
-    for (uint32_t lvl = 0; lvl < 2; lvl++)
-        adat_silence_exit[lvl] =
-            adat_encode_frame(adat_silence_nrzi[lvl], zero, lvl);
+    //const int32_t zero[8] = {0};
+    //for (uint32_t lvl = 0; lvl < 2; lvl++)
+    //    adat_silence_exit[lvl] =
+    //        adat_encode_frame(adat_silence_nrzi[lvl], zero, 1, lvl);
 }
 
 void adat_output_set_config(bool enabled, uint8_t pin) {
@@ -482,10 +581,10 @@ void adat_output_push_block(const out_s24_t (*bufs)[192], uint32_t sample_count)
 
     uint32_t wf = adat_wr_frame;
     uint32_t lvl = adat_line_level;
-    for (uint32_t i = 0; i < sample_count; i++) {
-        int32_t s[8];
-        for (int ch = 0; ch < 8; ch++) s[ch] = bufs[ch][i];
-        lvl = adat_encode_frame(&adat_ring[wf * ADAT_FRAME_WORDS], s, lvl);
+    uint32_t s_stride = 192;
+    const int32_t *s = &bufs[0][0];
+    for (uint32_t i = 0; i < sample_count; i++, s++) {
+        lvl = adat_encode_frame(&adat_ring[wf * ADAT_FRAME_WORDS], s, s_stride, lvl);
         if (++wf == ADAT_RING_FRAMES) wf = 0;
     }
     adat_line_level = lvl;
