@@ -672,6 +672,7 @@ typedef struct __attribute__((packed)) {
 // Platform IDs
 #define PLATFORM_RP2040             0
 #define PLATFORM_RP2350             1
+#define PLATFORM_RP2350B            3   // STM-32 is 2
 
 // Firmware version.  The packed form squeezes minor and patch into one nibble
 // each (plain nibble packing, not BCD; no carry), so each caps at 15.  It only
