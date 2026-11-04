@@ -37,13 +37,15 @@
 // Platform IDs
 #define WIRE_PLATFORM_RP2040      0
 #define WIRE_PLATFORM_RP2350      1
+#define WIRE_PLATFORM_RP2350B     3   // STM-32 is 2
+
 
 // ============================================================================
 // Section 1: Packet Header (16 bytes)
 // ============================================================================
 typedef struct __attribute__((packed)) {
     uint8_t  format_version;         // WIRE_FORMAT_VERSION
-    uint8_t  platform_id;            // WIRE_PLATFORM_RP2040 or _RP2350
+    uint8_t  platform_id;            // WIRE_PLATFORM_RP2040 or _RP2350 or _RP2350B
     uint8_t  num_channels;           // Actual channel count (7 or 17)
     uint8_t  num_output_channels;    // Actual output count (5 or 9)
     uint8_t  num_input_channels;     // Actual input count (2 or 8)

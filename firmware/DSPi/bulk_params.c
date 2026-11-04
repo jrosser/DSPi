@@ -36,6 +36,7 @@
 
 #include "hardware/sync.h"    // __dmb()
 #include "hardware/clocks.h"  // GPIO_TO_GPOUT_CLOCK_HANDLE() — MCK pin migration
+#include "hardware/structs/sysinfo.h"  //detect 2350A/B platform
 
 // LgSoundSyncStatus (lg_sound_sync.h, used by REQ_GET_LG_SOUND_SYNC_STATUS)
 // and WireLgSoundSync (this file's WireBulkParams section) must have
@@ -114,7 +115,7 @@ void bulk_params_collect(WireBulkParams *out) {
     // Header
     out->header.format_version = WIRE_FORMAT_VERSION;
 #if PICO_RP2350
-    out->header.platform_id = WIRE_PLATFORM_RP2350;
+    out->header.platform_id = (sysinfo_hw->package_sel == 0) ? WIRE_PLATFORM_RP2350B : WIRE_PLATFORM_RP2350;
 #else
     out->header.platform_id = WIRE_PLATFORM_RP2040;
 #endif
@@ -379,7 +380,7 @@ void bulk_params_collect(WireBulkParams *out) {
 
 int bulk_params_apply(const WireBulkParams *in, bool apply_pins) {
 #if PICO_RP2350
-    if (in->header.platform_id != WIRE_PLATFORM_RP2350)
+    if ((in->header.platform_id != WIRE_PLATFORM_RP2350) && (in->header.platform_id != WIRE_PLATFORM_RP2350B))
         return -2;
 #else
     if (in->header.platform_id != WIRE_PLATFORM_RP2040)

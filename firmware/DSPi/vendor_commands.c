@@ -2748,7 +2748,7 @@ static bool vendor_handle_get_body(tusb_control_request_t const *req) {
             case REQ_GET_PLATFORM: {
                 resp_buf[0] = PLATFORM_RP2040;
 #if PICO_RP2350
-                resp_buf[0] = PLATFORM_RP2350;
+                resp_buf[0] = (sysinfo_hw->package_sel == 0) ? PLATFORM_RP2350B : PLATFORM_RP2350;
 #endif
                 resp_buf[1] = (uint8_t)(FW_VERSION_PACKED >> 8);    // major
                 resp_buf[2] = (uint8_t)(FW_VERSION_PACKED & 0xFF);  // legacy (minor << 4) | patch, each caps at 15
