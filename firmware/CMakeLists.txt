@@ -20,6 +20,9 @@ add_compile_definitions(PICO_FLASH_SPI_CLKDIV=6)
 # XIP setup (CLKDIV≈3) stays in force.  The RP2350 override is done at runtime
 # in DSPi/flash_clkdiv.c by writing QMI registers directly.
 
+# Define custom board definition location (must be before include SDK)
+set(PICO_BOARD_HEADER_DIRS ${CMAKE_CURRENT_LIST_DIR}/DSPi/boards)
+
 # Pull in PICO SDK (must be before project)
 include(pico_sdk_import.cmake)
 
