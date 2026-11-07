@@ -179,6 +179,15 @@ else()
     pico_set_linker_script(DSPi ${CMAKE_CURRENT_SOURCE_DIR}/memmap_dspi_rp2350_xip.ld)
 endif()
 
+if (PICO_PLATFORM STREQUAL "rp2350-arm-s")
+    target_compile_definitions(DSPi PRIVATE
+        # autodetect PSRAM size and CS pin
+        PICO_AUTO_DETECT_PSRAM=1
+        # do not skip any pins defined as _DEFAULT_ pins in the board header as potential CS pins
+        PICO_AUTO_DETECT_PSRAM_CS_SKIP_DEFAULTS=0
+    )
+endif()
+
 pico_generate_pio_header(DSPi ${CMAKE_CURRENT_SOURCE_DIR}/i2s_input.pio)
 pico_generate_pio_header(DSPi ${CMAKE_CURRENT_SOURCE_DIR}/adat_input.pio)
 
@@ -230,6 +239,7 @@ target_link_libraries(DSPi
     hardware_flash
     hardware_adc
     hardware_i2c
+    hardware_psram
     pico_i2c_slave
     pico_audio_spdif_multi
     pico_audio_i2s_multi

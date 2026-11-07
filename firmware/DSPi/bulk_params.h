@@ -53,7 +53,9 @@ typedef struct __attribute__((packed)) {
     uint16_t payload_length;         // Total packet size including header
     uint16_t fw_version_major;       // Firmware version
     uint16_t fw_version_minor;
-    uint32_t reserved;               // Zero, future flags
+    uint8_t  psram_mb;               // Size of psram in bytes>>20
+    uint8_t  psram_cs;               // GPIO pin allocated to PSRAM CS, valid when psram_mb!=0
+    uint16_t reserved;               // Zero, future flags
 } WireHeader;                        // 16 bytes
 
 // ============================================================================

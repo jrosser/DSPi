@@ -40,6 +40,7 @@ MEMORY
     RAM(rwx) : ORIGIN =  0x20000000, LENGTH = 512k
     SCRATCH_X(rwx) : ORIGIN = 0x20080000, LENGTH = 4k
     SCRATCH_Y(rwx) : ORIGIN = 0x20081000, LENGTH = 4k
+    PSRAM(rwx)     : ORIGIN = 0x11000000, LENGTH = 8M
 }
 
 ENTRY(_entry_point)
@@ -382,5 +383,9 @@ SECTIONS
     ASSERT( __binary_info_header_end - __logical_binary_start <= 1024, "Binary info must be in first 1024 bytes of the binary")
     ASSERT( __embedded_block_end - __logical_binary_start <= 4096, "Embedded block must be in first 4096 bytes of the binary")
 
+
     /* todo assert on extra code */
 }
+
+/* Include the PSRAM section definitions */
+INCLUDE "sections_psram.incl"

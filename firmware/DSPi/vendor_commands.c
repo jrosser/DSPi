@@ -56,6 +56,7 @@
 #include "hardware/sync.h"
 #if PICO_RP2350
 #include "hardware/structs/sysinfo.h"
+#include "hardware/psram.h"
 #endif
 
 #include <stdio.h>
@@ -2760,7 +2761,9 @@ static bool vendor_handle_get_body(tusb_control_request_t const *req) {
                 // Pre-release ordinal (0 = final).  Betas share a patch number,
                 // so a host reading only 6 bytes cannot tell two of them apart.
                 resp_buf[6] = FW_VERSION_BETA;
-                vendor_send_response(resp_buf, 7);
+                resp_buf[7] = (uint8_t)(psram_get_size() >> 20);
+                resp_buf[8] = (uint8_t)flash_devinfo_get_cs_gpio(1);
+                vendor_send_response(resp_buf, 9);
                 return true;
             }
 

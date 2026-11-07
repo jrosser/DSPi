@@ -37,6 +37,7 @@
 #include "hardware/sync.h"    // __dmb()
 #include "hardware/clocks.h"  // GPIO_TO_GPOUT_CLOCK_HANDLE() — MCK pin migration
 #include "hardware/structs/sysinfo.h"  // detect 2350A/B platform
+#include "hardware/psram.h"            // detect psram size and cs gpio pin
 
 // LgSoundSyncStatus (lg_sound_sync.h, used by REQ_GET_LG_SOUND_SYNC_STATUS)
 // and WireLgSoundSync (this file's WireBulkParams section) must have
@@ -126,6 +127,9 @@ void bulk_params_collect(WireBulkParams *out) {
     out->header.payload_length = sizeof(WireBulkParams);
     out->header.fw_version_major = FW_VERSION_MAJOR;
     out->header.fw_version_minor = FW_VERSION_MINOR;
+    out->header.psram_mb = (uint8_t)(psram_get_size() >> 20);
+    out->header.psram_cs = (uint8_t)flash_devinfo_get_cs_gpio(1);
+
 
     // Global params
     out->global.preamp_gain_db = global_preamp_db[0];  // Legacy field: channel 0
